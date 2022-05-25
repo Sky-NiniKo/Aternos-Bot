@@ -1,0 +1,20 @@
+[[source]]
+url = "https://pypi.org/simple"
+verify_ssl = true
+name = "pypi"
+
+[packages]
+markdownify = "*"
+requests = "*"
+py-cord = {extras = ["speed"], version = "*"}
+discord-py-slash-command = "*"
+playwright = "*"
+playwright-stealth = "*"
+python-dotenv = "*"
+colour = "*"
+# pytest = "*"
+
+[dev-packages]
+
+[requires]
+python_version = "3.9"
