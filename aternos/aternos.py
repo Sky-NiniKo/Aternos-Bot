@@ -1,4 +1,5 @@
 import asyncio
+import contextlib
 import os
 import re
 import time
@@ -15,7 +16,7 @@ def get_full_path(path):
     if path[0] == "/" or path[1] == ":":
         return path
     else:
-        return os.path.dirname(os.path.realpath(__file__)) + "/" + path
+        return f"{os.path.dirname(os.path.realpath(__file__))}/{path}"
 
 
 async def do_stuff_periodically(interval, periodic_function):
@@ -122,17 +123,19 @@ class Aternos:
             self.page = await self.browser.new_page()
             await stealth_async(self.page)
 
-            await self.page.goto(self.hostname + '/go')
+            await asyncio.sleep(1)
+
+            await self.page.goto(f'{self.hostname}/go')
             await self.page.type('#user', self.user)
             await self.page.type('#password', self.password)
             await self.page.click('#login')
 
             try:
                 await self.page.wait_for_selector('.page-servers', timeout=self.timeout['default'])
-            except api_types.TimeoutError:
+            except api_types.TimeoutError as e:
                 error = await self.get_text('.login-error')
                 if error:
-                    raise Exception(error)
+                    raise Exception(error) from e
 
             server = await self.find_server(server_id)
             if not server:
@@ -193,11 +196,9 @@ class Aternos:
             await self.page.wait_for_timeout(1000)
 
             confirm_start = '.alert-buttons.btn-group a.btn.btn-green'
-            try:
+            with contextlib.suppress(api_types.TimeoutError):
                 await self.page.wait_for_selector(confirm_start, timeout=500)
                 await self.page.click(confirm_start)
-            except api_types.TimeoutError:
-                pass
 
             if 'server' not in self.page.url:
                 await self.page.goto('https://aternos.org/server')

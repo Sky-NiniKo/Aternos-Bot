@@ -1,9 +1,9 @@
-[![Codacy Badge](https://app.codacy.com/project/badge/Grade/c1dfefa74f484845974c03b186c4fb84)](https://www.codacy.com/gh/Sky-NiniKo/LAG-Bot/dashboard?utm_source=github.com&amp;utm_medium=referral&amp;utm_content=Sky-NiniKo/LAG-Bot&amp;utm_campaign=Badge_Grade)
-![License](https://img.shields.io/github/license/Sky-NiniKo/LAG-Bot)
-![Code size in bytes](https://img.shields.io/github/languages/code-size/Sky-NiniKo/LAG-Bot)
-![Repo size](https://img.shields.io/github/repo-size/Sky-NiniKo/LAG-Bot)
-![Lines of code](https://img.shields.io/tokei/lines/github/Sky-NiniKo/LAG-Bot)
-![Last commit](https://img.shields.io/github/last-commit/Sky-NiniKo/LAG-Bot)
+[![Codacy Badge](https://app.codacy.com/project/badge/Grade/c1dfefa74f484845974c03b186c4fb84)](https://www.codacy.com/gh/Sky-NiniKo/Aternos-Bot/dashboard?utm_source=github.com&amp;utm_medium=referral&amp;utm_content=Sky-NiniKo/LAG-Bot&amp;utm_campaign=Badge_Grade)
+![License](https://img.shields.io/github/license/Sky-NiniKo/Aternos-Bot)
+![Code size in bytes](https://img.shields.io/github/languages/code-size/Sky-NiniKo/Aternos-Bot)
+![Repo size](https://img.shields.io/github/repo-size/Sky-NiniKo/Aternos-Bot)
+![Lines of code](https://img.shields.io/tokei/lines/github/Sky-NiniKo/Aternos-Bot)
+![Last commit](https://img.shields.io/github/last-commit/Sky-NiniKo/Aternos-Bot)
 
 ## LAG-Bot
  Python Discord bot for [Aternos](https://aternos.org/) minecraft servers

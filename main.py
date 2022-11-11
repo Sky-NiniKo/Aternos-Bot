@@ -270,11 +270,11 @@ async def on_ready():
     print(await aternos.connect(bot.loop))
     aternos.on_update(activity, bot.loop)
 
-    try:
+    """try:
         synced = await bot.tree.sync()
         print(f"Synced {len(synced)} command(s)")
     except Exception as e:
-        print(e)
+        print(e)"""
 
 
 chrono = time.time()
