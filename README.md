@@ -10,7 +10,7 @@
 
 ### Installation
 ```bash
-git clone https://github.com/Sky-NiniKo/LAG-Bot.git
+git clone https://github.com/Sky-NiniKo/Aternos-Bot.git
 cd LAG-Bot
 pipenv sync
 playwright install

@@ -6,8 +6,7 @@ name = "pypi"
 [packages]
 markdownify = "*"
 requests = "*"
-py-cord = {extras = ["speed"], version = "*"}
-discord-py-slash-command = "*"
+"discord.py" = {extras = ["speed"], version = "*"}
 playwright = "*"
 playwright-stealth = "*"
 python-dotenv = "*"
@@ -17,4 +16,4 @@ colour = "*"
 [dev-packages]
 
 [requires]
-python_version = "3.9"
+python_version = "3.10"

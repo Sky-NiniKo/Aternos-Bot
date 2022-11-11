@@ -4,9 +4,8 @@ import os
 from random import randint
 
 import discord
+from discord import app_commands
 from discord.ext import commands, tasks
-from discord_slash import SlashCommand
-from discord_slash.utils.manage_commands import create_option
 from dotenv import load_dotenv
 from colour import Color
 
@@ -27,8 +26,7 @@ OWNER = os.getenv("OWNER")
 
 
 aternos = Aternos(user=ATERNOS_USER, password=ATERNOS_PASSWORD)
-bot = commands.Bot(command_prefix="!")
-slash = SlashCommand(bot, sync_commands=True)
+bot = commands.Bot(command_prefix="!", intents=discord.Intents.all())
 
 if MODPACK:
     curseforge = CurseForgeAPI(api_key=API_KEY)
@@ -41,15 +39,12 @@ to_notify = {}
 updater_start_activity = None
 
 
-@slash.slash(
+@bot.tree.command(
     name="start",
     description="Démarre le serveur Minecraft",
-    options=[
-        create_option(name="send_message", description="Vous envoie un message quand le serveur a terminer de démarrer",
-                      option_type=5, required=False)
-    ],
 )
-async def start_server(ctx, send_message=True):
+@app_commands.describe(send_message="Vous envoie un message quand le serveur a terminer de démarrer")
+async def start_server(interaction: discord.Interaction, send_message: bool = True):
     current_status = (await aternos.get_info())["status"]
 
     if current_status != 0:
@@ -59,15 +54,15 @@ async def start_server(ctx, send_message=True):
 
             embed.set_thumbnail(url="https://icon-icons.com/icons2/1283/PNG/512/1497619898-jd24_85173.png")
 
-            await ctx.send(embed=embed)
+            await interaction.response.send_message(embed=embed)
 
-            if send_message and ctx.author not in to_notify.get(ctx.channel.id, []):
-                to_notify.get(ctx.channel.id, []).append(ctx.author)
+            if send_message and interaction.user not in to_notify.get(interaction.channel.id, []):
+                to_notify.get(interaction.channel.id, []).append(interaction.user)
         else:
             embed = discord.Embed(title="Impossible de démarrer le serveur", colour=discord.Colour(0x386cbc),
                                   description="Il faut qu'il soit éteint")
 
-            await ctx.send(embed=embed)
+            await interaction.response.send_message(embed=embed)
         return
 
     embed = discord.Embed(title="Démarrage du serveur en cours", colour=discord.Colour(0x386cbc),
@@ -78,17 +73,17 @@ async def start_server(ctx, send_message=True):
     embed.set_thumbnail(
         url="https://cdn.dribbble.com/users/1092116/screenshots/2857934/loading-indicator-dribbble2.gif")
 
-    await ctx.send(embed=embed)
+    await interaction.response.send_message(embed=embed)
     if send_message:
-        to_notify[ctx.channel.id] = [ctx.author]
+        to_notify[interaction.channel.id] = [interaction.user]
     await aternos.start()
 
 
-@slash.slash(
+@bot.tree.command(
     name="timer",
     description="Donne le nombre exacte de secondes avant le fermeture automatique du serveur",
 )
-async def get_countdown(ctx):
+async def get_countdown(interaction: discord.Interaction):
     info = await aternos.get_info()
     seconds = await aternos.get_countdown()
     if seconds:
@@ -100,14 +95,14 @@ async def get_countdown(ctx):
     else:
         embed = discord.Embed(title="Pas de fermeture automatique prévue", colour=discord.Colour(0x386cbc))
         embed.set_author(name=info['name'], icon_url=bot.user.avatar_url)
-    await ctx.send(embed=embed)
+    await interaction.response.send_message(embed=embed)
 
 
-@slash.slash(
+@bot.tree.command(
     name="joueurs",
     description="Renvoie les joueurs qui sont connecter sur le serveur",
 )
-async def players(ctx):
+async def players(interaction: discord.Interaction):
     info = await aternos.get_info()
     if info['playerlist']:
         embed = discord.Embed(title="Joueurs présents", colour=discord.Colour(0x386cbc),
@@ -121,16 +116,16 @@ async def players(ctx):
                               description="Aucun joueur n'est connecter")
 
         embed.set_thumbnail(url="https://whatemoji.org/wp-content/uploads/2020/07/Desert-Emoji.png")
-        embed.set_author(name=info['name'], icon_url=bot.user.avatar_url)
+        embed.set_author(name=info['name'], icon_url=bot.user.display_avatar)
 
-    await ctx.send(embed=embed)
+    await interaction.response.send_message(embed=embed)
 
 
-@slash.slash(
+@bot.tree.command(
     name="tps",
     description="Renvoie le nombre de tps actuelle du serveur",
 )
-async def tps(ctx):
+async def tps(interaction: discord.Interaction):
     info = await aternos.get_info()
 
     if tps_number := await aternos.get_tps():
@@ -157,40 +152,40 @@ async def tps(ctx):
         embed.set_thumbnail(url="https://cdn.shopify.com/s/files/1/1061/1924/products/Emoji_Icon_-_Sad_Emoji_large.png")
         embed.set_author(name=info['name'], icon_url=bot.user.avatar_url)
 
-    await ctx.send(embed=embed)
+    await interaction.response.send_message(embed=embed)
 
 
-@slash.slash(
+@bot.tree.command(
     name="ping",
     description="Donne le ping que a le bot avec les serveurs Discord",
 )
-async def ping(ctx):
+async def ping(interaction: discord.Interaction):
     embed = discord.Embed(title="Pong !", colour=discord.Colour(0x386cbc),
                           description=f"Latence :\n{round(bot.latency * 1000, 2)} ms")
 
     embed.set_thumbnail(url="https://freesvg.org/img/paddle.png")
 
-    await ctx.send(embed=embed)
+    await interaction.response.send_message(embed=embed)
 
 
-@slash.slash(
+@bot.tree.command(
     name="ip",
     description="Donne l'IP pour se connecter au serveur",
 )
-async def ip(ctx):
+async def ip(interaction: discord.Interaction):
     info = await aternos.get_info()
     embed = discord.Embed(title=f"Pour vous connecter utiliser {info['ip']}:{info['port']}",
                           colour=discord.Colour(0x386cbc))
 
-    await ctx.send(embed=embed)
+    await interaction.response.send_message(embed=embed)
 
 
-@slash.slash(
+@bot.tree.command(
     name="code",
     description="Donne le lien du GitHub",
 )
-async def code(ctx):
-    await ctx.send("https://github.com/Sky-NiniKo/LAG-Bot")
+async def code(interaction: discord.Interaction):
+    await interaction.response.send_message("https://github.com/Sky-NiniKo/LAG-Bot")
 
 
 @bot.command()
@@ -274,6 +269,12 @@ async def on_ready():
     print(f"{bot.user.name} prêt en {round(time.time() - chrono, 3)}s\nTotal : {round(time.time() - start, 3)}s\n")
     print(await aternos.connect(bot.loop))
     aternos.on_update(activity, bot.loop)
+
+    try:
+        synced = await bot.tree.sync()
+        print(f"Synced {len(synced)} command(s)")
+    except Exception as e:
+        print(e)
 
 
 chrono = time.time()
