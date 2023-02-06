@@ -3,7 +3,7 @@ import time
 import requests
 from markdownify import markdownify
 
-
+# TODO: redo all of this
 class CurseForgeAPI:
     endpoint = 'https://api.curseforge.com'
     mod_id = None
@@ -50,7 +50,7 @@ class CurseForgeAPI:
             else:
                 raise ValueError("The argument mod must be specified")
 
-        if self.cooldown['last_file']['args'] == (mod,) and self.cooldown['last_file']['when_run'] + 5 > time.time():
+        if self.cooldown['last_file']['args'] == (mod,) and self.cooldown['last_file']['when_run'] + 30 > time.time():
             return self.cooldown['last_file']['last_result']
 
         data = requests.get(f'{self.endpoint}/v1/mods/{mod}', headers=self.headers).json()['data']['latestFiles'][-1]
@@ -77,7 +77,7 @@ class CurseForgeAPI:
         r = requests.get(f'{self.endpoint}/v1/mods/{mod}/files/{file}/changelog', headers=self.headers)
         return markdownify(r.json()['data'])
 
-    def is_a_new_version(self):
+    def new_version_available(self):
         if self.mod_id is None:
             raise ValueError("The argument mod must be specified")
 

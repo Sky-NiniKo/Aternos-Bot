@@ -7,13 +7,15 @@ name = "pypi"
 markdownify = "*"
 requests = "*"
 "discord.py" = {extras = ["speed"], version = "*"}
-playwright = "*"
-playwright-stealth = "*"
 python-dotenv = "*"
 colour = "*"
+javascript = "*"
+cloudscraper = "*"
+js2py = "*"
+websocket-client = "*"
 # pytest = "*"
 
 [dev-packages]
 
 [requires]
-python_version = "3.10"
+python_version = "3.11"

@@ -1,0 +1,60 @@
+# File extension subject to change
+launch_bot=Lancement du bot après {pre_start_time}s
+bot_ready={name} prêt en {start_time}s\nTotal : {total_time}s\n
+
+start_server_name=start
+start_server_description=Démarre le serveur Minecraft
+
+get_countdown_name=timer
+get_countdown_description=Donne le nombre exacte de secondes avant le fermeture automatique du serveur
+
+players_name=joueurs
+players_description=Renvoie les joueurs qui sont connecter sur le serveur
+
+tps_name=tps
+tps_description=Renvoie le nombre de tps actuelle du serveur
+
+ping_name=ping
+ping_description=Donne le ping que a le bot avec les serveurs Discord
+
+server_ip_name=ip
+server_ip_description=Donne l'IP pour se connecter au serveur
+
+get_code_name=code
+get_code_description=Donne le lien du GitHub
+
+
+starting_title=Démarrage du serveur en cours
+starting_description=Cela peut prendre un moment
+starting_description_other=Cela peut prendre un moment mais on vous\nenverra un message quand ce sera fini 😉
+
+started_already_title=Impossible de démarrer le serveur
+started_already_description=Il faut qu'il soit éteint
+
+already_starting_title=Le serveur démarre déjà !
+already_starting_description=On vous rajoute à la liste des gens à prévenir\n quand il aura démarrer
+
+countdown_title=Le serveur va se fermer dans {minutes}:{seconds:02}
+countdown_description=Si personne ne se connecte bien sûr
+
+no_countdown_title=Pas de fermeture automatique prévue
+
+present_players_title=Joueurs présents
+present_players_description={present_players}
+
+no_players_title=C'est le desert
+no_players_description=Aucun joueur n'est connecter
+
+current_tps_title=Le serveur tourne à {mspt} mspt soit {tps_number} tps
+current_tps_description=L'objectif c'est 20 tps
+
+no_tps_info_title=Les tps ne sont pas disponible.
+no_tps_info_description=Réessayer quand le serveur est allumer
+
+ping_title=Pong !
+ping_description=Latence :\n{latency} ms
+
+server_ip_title=Pour vous connecter utiliser {ip}:{port}
+
+server_has_started_title=Le serveur a démarrer !
+server_has_started_description=Qu'est que vous attendez ?\nConnecter vous !

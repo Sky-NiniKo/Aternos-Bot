@@ -1,239 +1,324 @@
-import asyncio
-import contextlib
-import os
+import json
+import logging
+import random
 import re
+import string
 import time
-import traceback as tb
-from typing import Union
+import urllib.parse
+import _thread
+from datetime import datetime, timedelta
+from enum import Enum
+from typing import List, Any
 
-from playwright._impl import _api_types as api_types
-from playwright.async_api._generated import BrowserContext, Page
-from playwright.async_api import async_playwright
-from playwright_stealth import stealth_async
+import cloudscraper
+import websocket as websocket_client
+from js2py import eval_js6
+from bs4 import BeautifulSoup
+from requests.cookies import RequestsCookieJar
+
+domain = "aternos.org"
+base_url = f"https://{domain}"
+login = {'user': 'Demare_maintenant',
+         'password': 'f854a68c1d1506d8bf5b2edc0ad114db'
+         }
 
 
-def get_full_path(path):
-    if path[0] == "/" or path[1] == ":":
-        return path
-    else:
-        return f"{os.path.dirname(os.path.realpath(__file__))}/{path}"
+def random_string(length: int) -> str:
+    # return Array(length + 1).join(f'{Math.random().toString(36)}00000000000000000'.slice(2, 18)).slice(0, length)
+    return ''.join(random.choice(string.ascii_lowercase + string.digits) for _ in range(length))
 
 
-async def do_stuff_periodically(interval, periodic_function):
-    while True:
-        await asyncio.gather(
-            asyncio.sleep(interval),
-            periodic_function(),
+def enum2condition(enum: Enum):
+    return lambda message: message.get(enum.type.value) == enum.value
+
+
+class AvailableStreams(Enum):
+    type = "stream"
+    CONSOLE = "console"
+    STATS = "stats"
+    TPS = "tick"
+    MEMORY = "heap"
+
+
+class AvailableTypes(Enum):
+    type = "type"
+    STATUS = "status"
+    TPS = "tick"
+    MEMORY = "heap"
+
+
+class HasAjaxToken:
+    def __init__(self, cookie_prefix: str, ajax_token: str = None):
+        self.scraper = cloudscraper.create_scraper(
+            browser={
+                'browser': 'firefox',
+                'platform': 'windows',
+                'mobile': False
+            }
+        )
+        self.cookie_prefix = cookie_prefix
+        if ajax_token:
+            self.ajax_token = ajax_token
+        else:
+            logging.warning("Don't forget to set ajax_token as soon as possible with set_ajax_token.")
+
+    def set_ajax_token(self, ajax_token: str) -> None:
+        """
+        To be use when you need self.scraper to get ajax_token and so you cannot set ajax_token in the __init__
+        Use carefully tough
+        :param ajax_token: string
+        """
+        self.ajax_token = ajax_token
+        logging.warning("You can safely ignore the line above because you have properly set ajax_token.")
+
+    def generate_ajax_token(self, url: str) -> str:
+        key = random_string(16)
+        value = random_string(16)
+        # document.cookie = COOKIE_PREFIX + "_SEC_" + key + "=" + value + ";path=" + url;
+        self.scraper.cookies[f"{self.cookie_prefix}_SEC_{key}"] = value
+        self.scraper.cookies["path"] = url
+        return f"{key}:{value}"
+
+    def build_url(self, path: str, data: dict = None, ajax_token: str = None) -> str:
+        if data is None:
+            data = {}
+        if ajax_token is None:
+            ajax_token = self.ajax_token
+        data["SEC"] = self.generate_ajax_token(f"{base_url}/{path}")
+        data["TOKEN"] = ajax_token
+        return f"{base_url}/{path}?{urllib.parse.urlencode(data)}"
+
+
+class AternosServer(HasAjaxToken):
+    websocket: websocket_client.WebSocketApp = None
+
+    def __init__(self, identifier: str, cookies: RequestsCookieJar, ajax_token: str, name: str = None):
+        super().__init__(cookie_prefix="ATERNOS", ajax_token=ajax_token)
+        self.id = identifier
+        self.scraper.cookies.update(cookies)
+        self.get_server_cookie()
+        self.name = name or self.get_name()
+        self.condition2subscribers: dict[Any, list] = {}
+        self.open_steams: dict[AvailableStreams, bool] = {stream: False for stream in AvailableStreams}
+        self.subscribe(self._set_info, enum2condition(AvailableTypes.STATUS))
+        self.subscribe(self._set_tps, enum2condition(AvailableStreams.TPS))
+        self.connect_websocket()
+
+    def connect_websocket(self) -> websocket_client.WebSocketApp:
+        cookie = ';'.join(
+            [
+                f'{name}={value}'
+                for (name, value) in self.scraper.cookies.get_dict(domain).items()
+            ]
         )
 
+        # websocket_client.enableTrace(True)
+        self.websocket = websocket_client.WebSocketApp(
+            f"wss://{domain}/hermes/",
+            cookie=cookie,
+            header=self.scraper.headers,
+            on_open=self.keep_alive,
+            on_message=self.on_message,
+            on_error=logging.error
+        )
 
-class Aternos:
-    browser: BrowserContext
-    page: Page
+        _thread.start_new_thread(self.websocket.run_forever, ())
+        return self.websocket
 
-    last_info = {}
-    updater: asyncio.Task
-    update_receivers = []
-    get_update_started = False
+    @staticmethod
+    def keep_alive(websocket):
+        def run():
+            while True:
+                time.sleep(49)
+                websocket.send('{type:"❤"}')
 
-    alive_keeper: asyncio.Task
+        _thread.start_new_thread(run, ())
 
-    hostname = 'https://aternos.org'
-    timeout = {"default": 10000, "start": 1200000, "stop": 60000}
-    server_state = {'offline': 'div.statuslabel i.fas.fa-stop-circle',
-                    'online': 'div.statuslabel i.fas.fa-play-circle',
-                    'waiting': 'div.statuslabel i.fas.fa-clock',
-                    'loading starting': 'div.statuslabel i.fas.fa-spinner-third'}
+    def on_message(self, _websocket, message):
+        message: dict = json.loads(message)
 
-    def __init__(self, user: str, password: str, ublock_origin_path='uBlock0.chromium',
-                 user_data_dir='tmp/test-user-data-dir'):
-        self.user = user
-        self.password = password
-        self.ublock_origin_path = get_full_path(ublock_origin_path)
-        self.user_data_dir = get_full_path(user_data_dir)
+        for condition, functions_to_call in self.condition2subscribers.items():
+            if condition(message):
+                for function in functions_to_call:
+                    function(message)
 
-    async def find_server(self, server_id):
-        if server_id is None:
-            return self.page.locator('.server-body >> nth=0')
-        try:
-            return self.page.locator(f'[data-id="{server_id}"]')
-        except api_types.TimeoutError:
-            return None
+    def get_server_cookie(self):
+        # Real code
+        """url = self.build_url("panel/ajax/friends/access.php")
+        response = self.scraper.post(url=url, data={"id": self.id})
+        if response.json().get("success") is not True or not response.ok:
+            raise NotImplementedError
+        return response.cookies"""
 
-    async def get_queue(self):
-        info = await self.get_info()
-        return info['queue']
+        # But its do just that
+        self.scraper.cookies.set('ATERNOS_SERVER', self.id, domain=domain)
+        return {'ATERNOS_SERVER': self.id}
 
-    async def get_info(self) -> dict:
-        info = await self.page.evaluate("lastStatus")
+    def start(self) -> None:
+        response = self.scraper.get(
+            self.build_url("panel/ajax/start.php", {"headstart": 0, "access-credits": 0})
+        ).json()
+        if response["success"] is False:
+            match response["error"]:
+                case "file":
+                    logging.warning("Server side error!")
+                case "eula":
+                    logging.warning("EULA not accepted")
+                case "wrongversion":
+                    logging.warning("Server software not good")
+                case "currently":
+                    logging.info("Server currently starting...")
+                case "already":
+                    logging.info("Server already started")
+                case _:
+                    raise NotImplemented
 
-        info['motd'] = re.sub(r"[\\][a-zA-Z0-9]{5}", lambda match: chr(int(match.group(0)[2:], 16)),
-                              info['motd'])  # convert unicode : "Pr\\u00E9parez vous" -> "Préparez vous"
+    def stop(self) -> None:
+        response = self.scraper.get(self.build_url("panel/ajax/stop.php"))
+        if not response.ok or response.json()["success"] is False:
+            raise NotImplemented
 
-        info["players"] = {"current": info["players"], "max": info["slots"]}
-        del info["slots"]
+    def restart(self) -> None:
+        pass
 
-        if info.get("maxram"):
-            info["ram"] = {"used": info["ram"], "max": info["maxram"]}
+    def open_stream(self, stream: AvailableStreams):
+        if not self.open_steams[stream]:
+            self.open_steams[stream] = True
+            self.websocket.send(f'{{"stream":"{stream.value}","type":"start"}}')
+
+    def close_stream(self, stream: AvailableStreams):
+        if self.open_steams[stream]:
+            self.open_steams[stream] = False
+            self.websocket.send(f'{{"stream":"{stream.value}","type":"stop"}}')
+
+    # for compatibility reason
+    def _set_info(self, message: dict) -> None:
+        self.info: dict = json.loads(message["message"])
+
+        self.info["motd"] = re.sub(r"\\[a-zA-Z0-9]{5}", lambda match: chr(int(match.group(0)[2:], 16)),
+                                   self.info['motd'])  # convert unicode : "Pr\\u00E9parez vous" -> "Préparez vous"
+
+        self.info["players"] = {"current": self.info["players"], "max": self.info["slots"]}
+        del self.info["slots"]
+
+        if self.info.get("maxram"):
+            self.info["ram"] = {"used": self.info["ram"], "max": self.info["maxram"]}
         else:
-            info["ram"] = {"used": info["ram"]}
-        return info
+            self.info["ram"] = {"used": self.info["ram"]}
 
-    async def get_countdown(self) -> Union[int, None]:
-        if timer := await self.get_text(".queue-time"):
-            try:
-                minutes, seconds = map(int, timer.split(':'))
-                return minutes * 60 + seconds
-            except ValueError:
-                return
+        if self.info.get("countdown"):
+            self.info["countdown"] = datetime.now() + timedelta(seconds=self.info["countdown"])
 
-    async def get_tps(self):
-        if (tps := await self.get_text(".js-tps")).isdigit():
-            return int(tps)
+        # here because _set_info is only run when this is a 'type: "status"' message
+        match self.info.get("status"):
+            case 1:
+                for stream in (AvailableStreams.TPS, AvailableStreams.MEMORY):
+                    self.open_stream(stream)
+                self.close_stream(AvailableStreams.CONSOLE)
+            case 2:
+                self.open_stream(AvailableStreams.CONSOLE)
+            case 3 | 4:
+                for stream in (AvailableStreams.TPS, AvailableStreams.MEMORY):
+                    self.close_stream(stream)
 
-    async def get_text(self, selector) -> str:
-        return (await self.page.locator(selector).inner_text()).strip()
+    # for compatibility reason
+    def get_info(self) -> dict:
+        return self.info or {}
 
-    async def wait_for_first(self, timeout, *selectors):
-        try:
-            elements = [
-                asyncio.create_task(
-                    self.page.wait_for_selector(
-                        selector, timeout=timeout, state="visible"
-                    )
-                )
-                for selector in selectors
-            ]
+    def _set_tps(self, message: dict) -> None:
+        self.mspt: int = message["data"]["averageTickTime"]
 
-            await asyncio.wait(elements, return_when=asyncio.FIRST_COMPLETED)
-            return True
-        except asyncio.TimeoutError:
-            return False
+    def get_tps(self) -> dict | None:
+        return (
+            {"tps": max(1 / (self.mspt / 1000), 20), "mspt": self.mspt}
+            if self.open_steams[AvailableStreams.TPS]
+            else None
+        )
 
-    async def connect(self, main_loop: asyncio.AbstractEventLoop, server_id=None):
-        start_time = time.time()
-        info = {}
+    def subscribe(self, function, condition=lambda _: True) -> None:
+        """
+        Subscribe a function to a stream of messages sends by Aternos
+        :param function: The function that you want to run when a message is received
+        :param condition: Function that the message and return true if the message should be transmitted
+        :return: None
+        """
+        if condition not in self.condition2subscribers:
+            self.condition2subscribers[condition] = []
+        self.condition2subscribers[condition].append(function)
 
-        try:
-            playwright = await async_playwright().start()
-            args = [f"--disable-extensions-except={self.ublock_origin_path}",
-                    f"--load-extension={self.ublock_origin_path}"]
-            self.browser = await playwright.chromium.launch_persistent_context(self.user_data_dir, headless=False,
-                                                                               args=args, locale='en-US')
-            self.page = await self.browser.new_page()
-            await stealth_async(self.page)
+    def get_countdown(self) -> int | None:
+        return (
+            (self.info["countdown"] - datetime.now()).seconds
+            if self.info.get("countdown")
+            else None
+        )
 
-            await asyncio.sleep(1)
+    def get_name(self) -> str:
+        raise NotImplemented
 
-            await self.page.goto(f'{self.hostname}/go')
-            await self.page.type('#user', self.user)
-            await self.page.type('#password', self.password)
-            await self.page.click('#login')
+    def __str__(self):
+        return f"#{self.id}: {self.name}"
 
-            try:
-                await self.page.wait_for_selector('.page-servers', timeout=self.timeout['default'])
-            except api_types.TimeoutError as e:
-                error = await self.get_text('.login-error')
-                if error:
-                    raise Exception(error) from e
 
-            server = await self.find_server(server_id)
-            if not server:
-                raise Exception(f'Server {server_id} not found')
+class AternosAccount(HasAjaxToken):
+    servers: List[AternosServer] = []
 
-            await server.click()
-            await self.page.wait_for_load_state("networkidle")
+    def __init__(self, user: str = None, password: str = None, login_data: dict = None):
+        if (user is None or password is None) and login_data is None:
+            raise ValueError("Provide login data!")
+        super().__init__(cookie_prefix="ATERNOS")
+        self.set_ajax_token(self.get_ajax_token())
+        self.login_data = login_data or {'user': user, 'password': password}
+        self.get_session_cookie()
+        self.get_servers()
 
-            choices = await self.page.query_selector('#accept-choices')
-            if choices:
-                await choices.click()
+    def get_ajax_token(self) -> str:
+        login_page = self.scraper.get(f"{base_url}/go")
+        if not login_page.ok:
+            raise ConnectionError("Login page not accessible")
+        soup = BeautifulSoup(login_page.content, "html.parser")
+        obfuscated_javascript = soup.find("script", dict(type="text/javascript")).text
+        # ...{AJAX_TOKEN=condition?if_true:if_false;}...
+        condition, if_true, if_false = re.findall(r"\{([^?]+)?([^:]+):([^;}]+);", obfuscated_javascript)[0]
+        if_true, if_false = eval_js6(if_true[1:]), eval_js6(if_false)
+        is_true = True
+        for part in re.findall(r"(&&|\|\||!)", condition):
+            match part:  # Thing between parts are always True
+                case "!":
+                    is_true = not is_true
+                case "||":
+                    is_true = True
+                case _:
+                    pass
+        return if_true if is_true else if_false
 
-            await self.page.wait_for_selector('.btn.btn-white')
-            await self.page.click('.btn.btn-white')
-            await self.page.wait_for_selector('div.btn.btn-white i.far.fa-sad-tear', state='hidden',
-                                              timeout=self.timeout['default'])
+    def get_session_cookie(self) -> RequestsCookieJar:
+        url = self.build_url("panel/ajax/account/login.php")
+        response = self.scraper.post(url=url, data=self.login_data)
+        if response.json().get("success") is not True or not response.ok:
+            raise NotImplementedError
+        return response.cookies
 
-            self.alive_keeper = main_loop.create_task(self.keepalive())
-
-            info = await self.get_info()
-        except Exception as e:
-            info['error'] = ''.join(tb.format_exception(None, e, e.__traceback__))
-        finally:
-            info['elapsed'] = time.time() - start_time
-            return info
-
-    async def keepalive(self):
-        while True:
-            await self.page.wait_for_selector(".btn.btn-white.MNjhsfJlwYUcNrLaBpLTqTVRnYiNhmbueuINeAGLX",
-                                              timeout=0, state='visible')
-            await self.page.click(".btn.btn-white.MNjhsfJlwYUcNrLaBpLTqTVRnYiNhmbueuINeAGLX")
-            await self.page.wait_for_selector('div.btn.btn-white i.far.fa-sad-tear', state='hidden', timeout=0)
-
-    async def get_update(self):
-        new_info = await self.get_info()
-        if self.last_info != new_info:
-            self.last_info = new_info
-
-            receivers = [
-                asyncio.create_task(receiver(new_info))
-                for receiver in self.update_receivers
-            ]
-
-            await asyncio.wait(receivers, return_when=asyncio.ALL_COMPLETED)
-
-    def on_update(self, func, main_loop: asyncio.AbstractEventLoop):
-        self.update_receivers.append(func)
-        if not self.get_update_started:
-            self.updater = main_loop.create_task(do_stuff_periodically(1, self.get_update))
-            self.get_update_started = True
-
-    async def start(self, wait=True):
-        try:
-            if not await self.page.query_selector('#start'):
-                return {"no effect": "the start button can not be found"}
-
-            await self.page.click('#start')
-            await self.page.wait_for_timeout(1000)
-
-            confirm_start = '.alert-buttons.btn-group a.btn.btn-green'
-            with contextlib.suppress(api_types.TimeoutError):
-                await self.page.wait_for_selector(confirm_start, timeout=500)
-                await self.page.click(confirm_start)
-
-            if 'server' not in self.page.url:
-                await self.page.goto('https://aternos.org/server')
-
-            await self.wait_for_first(self.timeout['start'], self.server_state["online"], self.server_state["waiting"])
-
-            if wait and (info := await self.get_info())['queue']:
-                await self.page.wait_for_selector('#confirm', timeout=info['queue']["minutes"] * 60000, state="visible")
-                await self.page.click('#confirm')
-
-            return await self.get_info()
-        except Exception as e:
-            return {'error': ''.join(tb.format_exception(None, e, e.__traceback__))}
-
-    async def close(self):
-        self.updater.cancel()
-        self.alive_keeper.cancel()
-        await self.browser.close()
+    def get_servers(self):
+        servers_page = self.scraper.get(f"{base_url}/servers")
+        if not servers_page.ok:
+            raise ConnectionError("Cannot access /servers")
+        soup = BeautifulSoup(servers_page.content, "html.parser")
+        servers = soup.find("div", class_="servers").findChildren("div", recursive=False)
+        for server in servers:
+            self.servers.append(AternosServer(
+                identifier=server.find("div", class_="server-id").text.strip()[1:],  # .strip() -> '#id'
+                cookies=self.scraper.cookies.copy(),
+                ajax_token=self.ajax_token,
+                name=server.find("div", class_="server-name").text.strip()
+            ))
 
 
 if __name__ == '__main__':
-    from pprint import pprint
-    from dotenv import load_dotenv
-
-    load_dotenv(dotenv_path="../.env")
-    user = os.getenv("ATERNOS_USER")
-    password = os.getenv("ATERNOS_PASSWORD")
-
-    API = Aternos(user=user, password=password)
-
-
-    async def main():
-        pprint(await API.connect(asyncio.get_event_loop()))
-        await API.page.screenshot(path='url.png')
-        await API.close()
-
-
-    asyncio.run(main())
+    logging.basicConfig(format='%(levelname)s:%(message)s', level=logging.INFO)
+    account = AternosAccount(login_data=login)
+    for one_server in account.servers:
+        logging.info(one_server)
+        one_server.subscribe(logging.info)
+    account.servers[0].start()
+    time.sleep(60)
